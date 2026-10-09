@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run every script on the simulated example and check the harmonized metrics against
-# the values the simulation knows to be true. Takes about 10 minutes.
+# the values the simulation knows to be true. Takes about 12 minutes.
 #
 #   bash example/run_example.sh [OUT_DIR]      (default: example_output)
 set -euo pipefail
@@ -64,7 +64,7 @@ if (!(ok1 && ok2 && ok3)) quit(status = 1)
 EOF
 
 # ---------------------------------------------------------------- permutation calibration
-echo "== permutation calibration (about 10 minutes; progress in $out/calibration.log)"
+echo "== permutation calibration (about 12 minutes; progress in $out/calibration.log)"
 cal="$repo/calibrate"
 log="$out/calibration.log"
 : > "$log"
@@ -79,6 +79,8 @@ run Rscript "$cal/make_assignments.R" --samples "$out/samples_free.tsv" --design
 for design in paired free; do
     run Rscript "$cal/run_methylkit.R" --samples "$out/samples_$design.tsv" \
         --assignments "$out/assignments_$design.tsv" --out-dir "$out/methylkit_dml_$design" --cores 2
+    run Rscript "$cal/run_methylkit.R" --samples "$out/samples_$design.tsv" --overdispersion MN \
+        --assignments "$out/assignments_$design.tsv" --out-dir "$out/methylkit_mn_dml_$design" --cores 2
     run Rscript "$cal/run_dss.R" --samples "$out/samples_$design.tsv" --level dmr \
         --assignments "$out/assignments_$design.tsv" --out-dir "$out/dss_$design" --ncores 2
 done
@@ -86,7 +88,8 @@ run Rscript "$cal/run_methylkit.R" --samples "$out/samples_paired.tsv" --level d
     --assignments "$out/assignments_paired.tsv" --out-dir "$out/methylkit_dmr_paired" --cores 2
 
 for design in paired free; do
-    files=("$out"/methylkit_dml_$design/counts.tsv "$out"/dss_$design/counts.tsv)
+    files=("$out"/methylkit_dml_$design/counts.tsv "$out"/methylkit_mn_dml_$design/counts.tsv
+           "$out"/dss_$design/counts.tsv)
     [ "$design" = paired ] && files+=("$out/methylkit_dmr_paired/counts.tsv")
     run Rscript "$cal/summarize_calibration.R" --out "$out/calibration_$design.tsv" "${files[@]}"
 done

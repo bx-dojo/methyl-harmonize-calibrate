@@ -32,7 +32,7 @@ scripts must be adapted to your own data.
 | `harmonize/bam_cpg_coverage.R` | Counts read depth at every reference CpG site from the BAM files, with the same `samtools depth` options for every aligner |
 | `harmonize/cpg_retention.R` | Share of the CpG sites covered in the BAM files that the methylation caller kept |
 | `calibrate/make_assignments.R` | Observed and permuted label assignments, for unrelated (free) or paired samples |
-| `calibrate/run_methylkit.R` | methylKit call counts for every assignment, for single CpG sites or windows and regions |
+| `calibrate/run_methylkit.R` | methylKit call counts for every assignment, for single CpG sites or windows and regions, with or without the overdispersion correction |
 | `calibrate/run_dss.R` | DSS call counts for every assignment, for single CpG sites and, optionally, regions from `callDMR` |
 | `calibrate/summarize_calibration.R` | Observed count against the null: ratio to the null mean and maximum, and the permutation p-value |
 | `example/` | A small simulated data set that runs every script and checks the harmonized metrics against known values |
@@ -60,8 +60,9 @@ Groups A and B are paired samples that differ in 30 regions, and every caller re
 far more calls than with any permuted labels. Groups C and D do not differ, but each
 individual deviates strongly from the others at a few sites. There methylKit, whose
 default test pools the reads of a group, still returns dozens of calls at FDR < 0.01,
-yet no more than with shuffled labels (a ratio near 1). The example takes about 10
-minutes, most of it for the permutations.
+yet no more than with shuffled labels (a ratio near 1). With its overdispersion
+correction, methylKit returns no calls there, and still returns calls for A and B. The
+example takes about 12 minutes, most of it for the permutations.
 
 ## Harmonized metrics
 
@@ -168,7 +169,7 @@ Rscript calibrate/make_assignments.R --samples samples.tsv --design free \
 
 # 2. rerun the analysis for every assignment
 Rscript calibrate/run_methylkit.R --samples samples.tsv --assignments assignments.tsv \
-    --out-dir methylkit_dml
+    --out-dir methylkit_dml                 # add --overdispersion MN for the correction
 Rscript calibrate/run_dss.R --samples samples.tsv --assignments assignments.tsv \
     --level dmr --out-dir dss --ncores 8
 
@@ -189,12 +190,16 @@ count with the largest permuted count as well as with the null mean.
 **Analysis settings.** Both runners apply the same per-sample filter, at least
 `--min-coverage` reads (10) and no more than the `--max-percentile` of the sample's
 coverage (99.9). methylKit then tests only the sites that pass in every sample, at its
-defaults. DSS tests every site that passes in at least one sample, and a sample that
-failed there enters with no reads, which DSS treats as missing. `--all-samples` makes DSS
-test the same sites as methylKit. Both count calls over a grid of significance cutoffs
-(`--q`) and minimum absolute differences in percentage points (`--diff`). Settings other
-than the labels are fixed across assignments, so differences in the counts come from
-the labels alone.
+defaults. Its default test pools the reads of each group and does not allow for variation
+between samples. `--overdispersion MN` applies methylKit's correction for that variation,
+which scales each site's test by an estimated overdispersion factor and uses the F test,
+and labels the counts `methylKit (MN)`. DSS tests every site that passes in at least one
+sample, and a sample that failed there enters with no reads, which DSS treats as missing.
+`--all-samples` makes DSS test the same sites as methylKit, and `--smoothing` turns on
+DSS smoothing, which borrows information from neighboring CpG sites. Both runners count
+calls over a grid of significance cutoffs (`--q`) and minimum absolute differences in
+percentage points (`--diff`). Settings other than the labels are fixed across
+assignments, so differences in the counts come from the labels alone.
 
 **Run time.** Each assignment reruns the full test, so a calibration costs as much as the
 original analysis times the number of assignments. Every assignment is written to its

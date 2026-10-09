@@ -9,7 +9,9 @@
 #   2. --level dml: keep the sites that pass in every sample (unite)
 #      --level dmr: count reads in adjacent, non-overlapping windows of --window bp
 #      (tileMethylCounts), then unite
-#   3. test with calculateDiffMeth at its defaults (logistic regression)
+#   3. test with calculateDiffMeth at its defaults (logistic regression), or with
+#      --overdispersion MN, its correction for variation between samples, which scales
+#      each site's test by an estimated overdispersion factor and uses the F test
 #   4. count the sites or windows with q-value < each --q and absolute methylation
 #      difference >= each --diff (percentage points). For --level dmr, runs of adjacent
 #      significant windows that change in the same direction are also merged into
@@ -19,7 +21,7 @@
 #   Rscript run_methylkit.R --samples samples.tsv --assignments assignments.tsv \
 #       --out-dir DIR [--level dml] [--min-coverage 10] [--max-percentile 99.9] \
 #       [--q 0.05,0.01,0.001] [--diff 0,5,10,15,20,25,30,40,50] [--window 100] \
-#       [--ids observed,perm_001,...] [--cores 1]
+#       [--overdispersion none] [--ids observed,perm_001,...] [--cores 1]
 #
 # samples.tsv: sample, group, file (see read_calls.R for the call file format). One
 # checkpoint per assignment is written to DIR/counts/, finished ones are skipped, and
@@ -35,11 +37,13 @@ source(file.path(script_dir, "read_calls.R"))
 opt <- parse_opts(commandArgs(trailingOnly = TRUE), list(
   samples = NULL, assignments = NULL, out_dir = NULL, level = "dml",
   min_coverage = "10", max_percentile = "99.9", q = "0.05,0.01,0.001",
-  diff = "0,5,10,15,20,25,30,40,50", window = "100", ids = NULL, cores = "1"))
+  diff = "0,5,10,15,20,25,30,40,50", window = "100", overdispersion = "none",
+  ids = NULL, cores = "1"))
 if (is.null(opt$samples) || is.null(opt$assignments) || is.null(opt$out_dir)) {
   stop("usage: run_methylkit.R --samples F --assignments F --out-dir D [options]")
 }
 if (!opt$level %in% c("dml", "dmr")) stop("--level must be dml or dmr")
+if (!opt$overdispersion %in% c("none", "MN")) stop("--overdispersion must be none or MN")
 q_cut <- num_list(opt$q); d_cut <- num_list(opt$diff)
 design <- read_design(opt$samples, opt$assignments, opt$ids)
 samples <- design$samples; assignments <- design$assignments
@@ -72,6 +76,7 @@ if (opt$level == "dmr") {
 }
 united <- unite(obj, destrand = FALSE)
 unit <- if (opt$level == "dml") "sites" else "windows"
+caller <- if (opt$overdispersion == "MN") "methylKit (MN)" else "methylKit"
 message("tested ", unit, ": ", nrow(united))
 
 run_one <- function(i) {
@@ -79,7 +84,11 @@ run_one <- function(i) {
   group_b <- strsplit(a$group_b, ",")[[1]]
   m <- united
   m@treatment <- as.integer(m@sample.ids %in% group_b)
-  res <- getData(calculateDiffMeth(m))
+  res <- getData(if (opt$overdispersion == "MN") {
+    calculateDiffMeth(m, overdispersion = "MN", test = "F")
+  } else {
+    calculateDiffMeth(m)
+  })
   valid <- is.finite(res$qvalue) & is.finite(res$meth.diff)
   rows <- list()
   for (qc in q_cut) for (dc in d_cut) {
@@ -94,7 +103,7 @@ run_one <- function(i) {
   }
   d <- rbindlist(rows, use.names = TRUE)
   d <- cbind(data.table(assignment_id = a$assignment_id, observed = a$observed,
-                        caller = "methylKit", level = opt$level, tested = nrow(res)), d)
+                        caller = caller, level = opt$level, tested = nrow(res)), d)
   write_checkpoint(d, checkpoint_path(opt$out_dir, a$assignment_id))
   message("done ", a$assignment_id)
   invisible(TRUE)
